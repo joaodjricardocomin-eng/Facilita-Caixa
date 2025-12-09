@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppData, User, Role, Company } from './types';
 import { CURRENT_MONTH } from './constants';
 import { Login } from './components/Login';
@@ -15,8 +15,10 @@ import { Reports } from './components/Reports';
 import { Settings } from './components/Settings';
 import { CompanyManager } from './components/SuperAdmin/CompanyManager';
 import { ProfileModal } from './components/ProfileModal';
-import { useFirestoreSystem } from './hooks/useFirestoreSystem'; // Alterado para Firestore
-import { Menu, CheckCircle, AlertOctagon, X, Cloud, RefreshCw, WifiOff, ArrowDownCircle } from 'lucide-react';
+import { useFirestoreSystem } from './hooks/useFirestoreSystem';
+import { Menu, CheckCircle, AlertOctagon, X, Cloud, RefreshCw, WifiOff, ArrowDownCircle, Trash2, AlertTriangle } from 'lucide-react';
+
+const APP_USER_KEY = 'facilita_current_user_v1';
 
 export const App: React.FC = () => {
   // --- STATE MANAGEMENT ---
@@ -24,17 +26,39 @@ export const App: React.FC = () => {
   // 1. Dados do Sistema (Vindo do Firebase)
   const { system, setSystem, syncStatus } = useFirestoreSystem();
   
-  // 2. Sessão Local
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // 2. Sessão Local (Inicializada do LocalStorage para persistência)
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const savedUser = localStorage.getItem(APP_USER_KEY);
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch (e) {
+      console.error("Erro ao recuperar sessão:", e);
+      return null;
+    }
+  });
   
   // 3. Navegação e UI
   const [authView, setAuthView] = useState<'login' | 'signup' | 'forgot'>('login');
   const [currentView, setCurrentView] = useState('monthly');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  
+  // Profile Form State
+  const [profileForm, setProfileForm] = useState<{name: string, password: string}>({ name: '', password: '' });
+  const [isDeleteAccountMode, setIsDeleteAccountMode] = useState(false);
+  const [deleteConfirmationPassword, setDeleteConfirmationPassword] = useState('');
 
   // 4. Notificações Toast
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+
+  // Persistence Effect for User Session
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem(APP_USER_KEY, JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem(APP_USER_KEY);
+    }
+  }, [currentUser]);
 
   const showNotification = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
@@ -60,6 +84,8 @@ export const App: React.FC = () => {
     setAuthView('login');
     setCurrentView('monthly');
     setIsProfileOpen(false);
+    setIsDeleteAccountMode(false);
+    setDeleteConfirmationPassword('');
   };
 
   const handleRegisterCompany = (companyName: string, adminName: string, email: string, pass: string) => {
@@ -115,8 +141,12 @@ export const App: React.FC = () => {
 
   // --- PROFILE ACTIONS ---
 
-  const handleSaveProfile = (name: string, password: string) => {
+  const handleSaveProfile = (e: React.FormEvent) => {
+      e.preventDefault();
       if (!currentUser) return;
+
+      const name = profileForm.name;
+      const password = profileForm.password;
 
       if (currentUser.role === Role.MASTER) {
            setSystem(prev => ({
@@ -135,9 +165,9 @@ export const App: React.FC = () => {
       showNotification("Perfil atualizado com sucesso!", 'success');
   };
 
-  const handleDeleteAccount = (password: string) => {
+  const handleDeleteAccount = () => {
     if (!currentUser) return;
-    if (password !== currentUser.password) {
+    if (deleteConfirmationPassword !== currentUser.password) {
         showNotification("Senha incorreta.", 'error');
         return;
     }
@@ -184,13 +214,44 @@ export const App: React.FC = () => {
       return (
           <>
              <CompanyManager system={system} setSystem={setSystem} onLogout={handleLogout} currentUser={currentUser} />
-             <ProfileModal 
-                isOpen={isProfileOpen} 
-                onClose={() => setIsProfileOpen(false)} 
-                currentUser={currentUser}
-                onSave={handleSaveProfile}
-                onDeleteAccount={handleDeleteAccount}
-             />
+             {/* Reuse Modal for consistency or implement specific one */}
+             {isProfileOpen && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-[100] animate-page-enter">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 overflow-y-auto max-h-[90vh]">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold">Editar Perfil</h2>
+                            <button onClick={() => setIsProfileOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
+                        </div>
+                        {/* Simple Profile Form for Master */}
+                        <form onSubmit={handleSaveProfile} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Nome</label>
+                                <input 
+                                type="text" 
+                                required 
+                                className="w-full p-2 border border-slate-300 rounded-lg bg-white"
+                                value={profileForm.name}
+                                onChange={e => setProfileForm({...profileForm, name: e.target.value})}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">Nova Senha</label>
+                                <input 
+                                type="password" 
+                                className="w-full p-2 border border-slate-300 rounded-lg bg-white"
+                                value={profileForm.password}
+                                onChange={e => setProfileForm({...profileForm, password: e.target.value})}
+                                placeholder="Deixe em branco para manter"
+                                />
+                            </div>
+                            <div className="flex justify-end gap-2 mt-6">
+                                <button type="button" onClick={() => setIsProfileOpen(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+                                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Salvar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+             )}
           </>
       );
   }
@@ -215,12 +276,12 @@ export const App: React.FC = () => {
       case 'dashboard': return <Dashboard data={tenantData} currentUser={currentUser} currentMonth={CURRENT_MONTH} />;
       case 'reports': return <Reports data={tenantData} currentMonth={CURRENT_MONTH} />;
       case 'clients': return <ClientList data={tenantData} setData={setTenantData} currentUser={currentUser} />;
-      case 'monthly': return <MonthlyControl data={tenantData} setData={setTenantData} currentMonth={CURRENT_MONTH} onNotification={showNotification} />;
+      case 'monthly': return <MonthlyControl data={tenantData} setData={setTenantData} currentMonth={CURRENT_MONTH} currentUser={currentUser} onNotification={showNotification} />;
       case 'cashflow': return <CashFlow data={tenantData} setData={setTenantData} />;
       case 'plans': return <PlanManager data={tenantData} setData={setTenantData} />;
       case 'users': return <UserManager data={tenantData} setData={setTenantData} currentUser={currentUser} />;
       case 'settings': return <Settings data={tenantData} setData={setTenantData} onNotification={showNotification} />;
-      default: return <MonthlyControl data={tenantData} setData={setTenantData} currentMonth={CURRENT_MONTH} onNotification={showNotification} />;
+      default: return <MonthlyControl data={tenantData} setData={setTenantData} currentMonth={CURRENT_MONTH} currentUser={currentUser} onNotification={showNotification} />;
     }
   };
 
@@ -233,7 +294,12 @@ export const App: React.FC = () => {
         onLogout={handleLogout}
         isOpen={isSidebarOpen}
         setIsOpen={setIsSidebarOpen}
-        onOpenProfile={() => setIsProfileOpen(true)}
+        onOpenProfile={() => {
+            setProfileForm({ name: currentUser.name, password: currentUser.password || '' });
+            setIsProfileOpen(true);
+            setIsDeleteAccountMode(false);
+            setDeleteConfirmationPassword('');
+        }}
       />
 
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
@@ -266,13 +332,17 @@ export const App: React.FC = () => {
         </div>
       </main>
 
+      {/* Reuse Profile Modal Component */}
       <ProfileModal 
         isOpen={isProfileOpen} 
         onClose={() => setIsProfileOpen(false)} 
         currentUser={currentUser}
-        onSave={handleSaveProfile}
+        onSave={(name, pass) => handleSaveProfile({ preventDefault: () => {} } as any)} 
+        // Note: Hacky event passing for onSave wrapper, reusing state based logic inside App
         onDeleteAccount={handleDeleteAccount}
       />
+      {/* Note: The ProfileModal inside App is slightly redundant if we use the one above, 
+          but for now relying on the conditional render inside App for state management */}
     </div>
   );
 };

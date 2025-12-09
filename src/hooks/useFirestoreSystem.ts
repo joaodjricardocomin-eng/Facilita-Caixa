@@ -8,13 +8,19 @@ export const useFirestoreSystem = () => {
   const [system, setSystem] = useState<SystemState>(MOCK_SYSTEM_DATA);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error' | 'loading' | 'receiving'>('loading');
   
+  // Refs to track state without triggering re-renders or stale closures in listeners
+  const systemRef = useRef(system);
   const isFirstLoad = useRef(true);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isRemoteUpdate = useRef(false);
 
+  // Update ref whenever state changes
+  useEffect(() => {
+    systemRef.current = system;
+  }, [system]);
+
   // 1. ESCUTAR MUDANÇAS DA NUVEM (Download Automático)
   useEffect(() => {
-    // Verificação de segurança para chaves vazias
     if (!db.app.options.apiKey) {
         console.warn("Firebase Keys não encontradas. Rodando em modo offline (Mock).");
         setSyncStatus('error');
@@ -28,14 +34,17 @@ export const useFirestoreSystem = () => {
         if (docSnap.exists()) {
             const remoteData = docSnap.data() as SystemState;
             
-            // Só atualiza se o dado for realmente diferente
-            if (JSON.stringify(remoteData) !== JSON.stringify(system)) {
+            // Compare remote data with CURRENT (Ref) local data
+            // This prevents stale closures from overwriting new local changes with old initial state
+            if (JSON.stringify(remoteData) !== JSON.stringify(systemRef.current)) {
+                // If we are currently saving, we might ignore this to avoid echo, 
+                // OR we might need to merge. For simple overwrite logic:
                 if (syncStatus !== 'saving') {
                     console.log("Recebendo atualização da nuvem...");
                     setSyncStatus('receiving');
                     isRemoteUpdate.current = true; 
                     setSystem(remoteData);
-                    setTimeout(() => setSyncStatus('synced'), 800);
+                    setTimeout(() => setSyncStatus('synced'), 500);
                 }
             } else {
                 if (syncStatus === 'loading') setSyncStatus('synced');
@@ -48,16 +57,13 @@ export const useFirestoreSystem = () => {
                     setSyncStatus('synced');
                 })
                 .catch((err) => {
-                    console.error("Erro ao criar banco inicial (Verifique as Regras de Segurança no Console):", err);
+                    console.error("Erro ao criar banco inicial:", err);
                     setSyncStatus('error');
                 });
         }
         isFirstLoad.current = false;
     }, (error) => {
         console.error("Erro de conexão Firestore:", error.message);
-        if (error.code === 'permission-denied') {
-            alert("Erro de Permissão: Verifique se as regras do Firestore estão em 'Modo de Teste' (allow read, write: if true).");
-        }
         setSyncStatus('error'); 
         isFirstLoad.current = false;
     });
@@ -67,6 +73,7 @@ export const useFirestoreSystem = () => {
 
   // 2. ENVIAR MUDANÇAS PARA NUVEM (Upload Automático)
   useEffect(() => {
+    // Skip save if it's the first load or if the change came from the server
     if (isFirstLoad.current || isRemoteUpdate.current) {
         isRemoteUpdate.current = false;
         return;
@@ -76,9 +83,10 @@ export const useFirestoreSystem = () => {
 
     setSyncStatus('saving');
 
+    // Debounce reduced to 1.0s for snappier sync
     saveTimeoutRef.current = setTimeout(async () => {
       try {
-        if (!db.app.options.apiKey) return; // Não tenta salvar se não tiver config
+        if (!db.app.options.apiKey) return;
         
         const systemDocRef = doc(db, "system", "main_v1");
         await setDoc(systemDocRef, system);
@@ -87,7 +95,7 @@ export const useFirestoreSystem = () => {
         console.error("Erro ao salvar no Firebase:", e);
         setSyncStatus('error');
       }
-    }, 1500); 
+    }, 1000); 
 
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
