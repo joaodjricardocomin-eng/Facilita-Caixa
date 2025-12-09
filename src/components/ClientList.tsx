@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AppData, Client, Role, User } from '../types';
-import { Plus, Trash2, Edit2, AlertTriangle, Search, Filter } from 'lucide-react';
+import { Plus, Trash2, Edit2, AlertTriangle, Search } from 'lucide-react';
 
 interface ClientListProps {
   data: AppData;

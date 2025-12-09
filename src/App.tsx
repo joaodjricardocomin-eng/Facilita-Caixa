@@ -215,12 +215,12 @@ export const App: React.FC = () => {
       case 'dashboard': return <Dashboard data={tenantData} currentUser={currentUser} currentMonth={CURRENT_MONTH} />;
       case 'reports': return <Reports data={tenantData} currentMonth={CURRENT_MONTH} />;
       case 'clients': return <ClientList data={tenantData} setData={setTenantData} currentUser={currentUser} />;
-      case 'monthly': return <MonthlyControl data={tenantData} setData={setTenantData} currentMonth={CURRENT_MONTH} currentUser={currentUser} onNotification={showNotification} />;
+      case 'monthly': return <MonthlyControl data={tenantData} setData={setTenantData} currentMonth={CURRENT_MONTH} onNotification={showNotification} />;
       case 'cashflow': return <CashFlow data={tenantData} setData={setTenantData} />;
       case 'plans': return <PlanManager data={tenantData} setData={setTenantData} />;
       case 'users': return <UserManager data={tenantData} setData={setTenantData} currentUser={currentUser} />;
       case 'settings': return <Settings data={tenantData} setData={setTenantData} onNotification={showNotification} />;
-      default: return <MonthlyControl data={tenantData} setData={setTenantData} currentMonth={CURRENT_MONTH} currentUser={currentUser} onNotification={showNotification} />;
+      default: return <MonthlyControl data={tenantData} setData={setTenantData} currentMonth={CURRENT_MONTH} onNotification={showNotification} />;
     }
   };
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Role } from '../types';
+import { User } from '../types';
 import { X, Trash2, AlertTriangle } from 'lucide-react';
 
 interface ProfileModalProps {

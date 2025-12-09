@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { SystemState, Company, Role, User } from '../../types';
-import { Building, Users, Power, Trash2, Edit2, LogOut, Plus, Search, ShieldCheck } from 'lucide-react';
+import { Building, Power, Trash2, Edit2, LogOut, Plus, Search, ShieldCheck } from 'lucide-react';
 
 interface CompanyManagerProps {
   system: SystemState;

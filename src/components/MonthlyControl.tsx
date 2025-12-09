@@ -1,16 +1,15 @@
 import React, { useCallback, useState } from 'react';
-import { AppData, MonthlyRecord, PaymentStatus, Role, User, UsageLog, CashFlowItem, CashFlowType, PaymentMethod } from '../types';
+import { AppData, MonthlyRecord, PaymentStatus, UsageLog, CashFlowItem, CashFlowType, PaymentMethod } from '../types';
 import { AlertCircle, RefreshCcw, Plus, History, X, Trash2, AlertTriangle, Search, DollarSign } from 'lucide-react';
 
 interface MonthlyControlProps {
   data: AppData;
   setData: React.Dispatch<React.SetStateAction<AppData>>;
   currentMonth: string;
-  currentUser: User;
   onNotification?: (message: string, type: 'success' | 'error') => void;
 }
 
-export const MonthlyControl: React.FC<MonthlyControlProps> = ({ data, setData, currentMonth, currentUser, onNotification }) => {
+export const MonthlyControl: React.FC<MonthlyControlProps> = ({ data, setData, currentMonth, onNotification }) => {
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isAddServiceModalOpen, setIsAddServiceModalOpen] = useState(false);
   const [selectedClientForModal, setSelectedClientForModal] = useState<string | null>(null);

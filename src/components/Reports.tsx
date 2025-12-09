@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { AppData, CashFlowType, PaymentStatus, PaymentMethod } from '../types';
-import { FileText, Download, Users, Layers, Calculator, DollarSign, Calendar, Filter, Check } from 'lucide-react';
+import { AppData, CashFlowType, PaymentMethod } from '../types';
+import { Download, Users, Layers, Calculator, DollarSign, Calendar, Filter, Check } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -149,7 +149,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, currentMonth }) => {
         doc.setFontSize(10);
         doc.text(`Entradas: ${formatCurrency(income)}`, 14, finalY);
         doc.text(`Saídas: ${formatCurrency(expense)}`, 14, finalY + 5);
-        doc.setFont(undefined, 'bold');
+        doc.setFont("helvetica", "bold");
         doc.text(`Saldo do Período: ${formatCurrency(balance)}`, 14, finalY + 12);
     } 
     else if (selectedReport === 'clients') {
@@ -252,7 +252,7 @@ export const Reports: React.FC<ReportsProps> = ({ data, currentMonth }) => {
 
 
     // Footer
-    const pageCount = doc.internal.getNumberOfPages();
+    const pageCount = (doc as any).internal.getNumberOfPages();
     for(let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
         doc.setFontSize(8);
