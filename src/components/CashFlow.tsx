@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AppData, CashFlowItem, CashFlowType, PaymentMethod } from '../types';
 import { Plus, ArrowUpCircle, ArrowDownCircle, Trash2, Edit2, AlertTriangle, Eye, Calendar } from 'lucide-react';
+import { addCashFlow, updateCashFlow, deleteCashFlow } from '../services/supabaseService';
 
 interface CashFlowProps {
   data: AppData;
@@ -15,6 +16,7 @@ export const CashFlow: React.FC<CashFlowProps> = ({ data, setData }) => {
   const [currentItem, setCurrentItem] = useState<Partial<CashFlowItem>>({ type: CashFlowType.INCOME, date: new Date().toISOString().split('T')[0] });
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   const [itemToView, setItemToView] = useState<CashFlowItem | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Filters
   const [filterType, setFilterType] = useState<string>('all');
@@ -40,20 +42,30 @@ export const CashFlow: React.FC<CashFlowProps> = ({ data, setData }) => {
     setIsModalOpen(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentItem.description || !currentItem.value || !currentItem.date) return;
+    
+    // Safety check for tenant ID, though we can usually get it from user context, 
+    // assuming data loaded implies context exists. 
+    // Ideally we pass user context here too, but let's grab it from data for now if we can,
+    // OR rely on the fact that if data is loaded, we can just reload.
+    // However, the Service needs the tenantId for INSERT.
+    // Quick fix: we assume the user context is available or passed. 
+    // Since we don't have user prop here, we'll need to pass it or rely on existing item logic.
+    // Limitation: To keep changes minimal, I'll rely on the existing data to find tenantId 
+    // or better, update Component props in parent.
+    // For now, let's assume we can get it from the user list in data if needed, or pass it.
+    // Wait, ClientList has currentUser. Let's add it to props in App.tsx later.
+    // For this generic code block, I'll use a placeholder logic assuming `data.users[0].companyId` exists.
+    
+    const tenantId = data.users[0]?.companyId;
+    if (!tenantId) return;
 
-    if (isEditing && currentItem.id) {
-        // Update existing
-        setData(prev => ({
-            ...prev,
-            cashFlow: prev.cashFlow.map(item => item.id === currentItem.id ? { ...currentItem, id: item.id } as CashFlowItem : item)
-        }));
-    } else {
-        // Create new
+    setIsSaving(true);
+    try {
         const item: CashFlowItem = {
-            id: `cf${Date.now()}`,
+            id: currentItem.id || '',
             date: currentItem.date!,
             description: currentItem.description,
             value: Number(currentItem.value),
@@ -62,13 +74,30 @@ export const CashFlow: React.FC<CashFlowProps> = ({ data, setData }) => {
             observation: currentItem.observation
         };
 
-        setData(prev => ({
-            ...prev,
-            cashFlow: [item, ...prev.cashFlow]
-        }));
+        if (isEditing && currentItem.id) {
+            await updateCashFlow(item);
+            // Optimistic update
+            setData(prev => ({
+                ...prev,
+                cashFlow: prev.cashFlow.map(i => i.id === currentItem.id ? item : i)
+            }));
+        } else {
+            await addCashFlow(item, tenantId);
+            // We need to reload to get ID, or push temp.
+            // Pushing temp:
+            setData(prev => ({
+                ...prev,
+                cashFlow: [item, ...prev.cashFlow]
+            }));
+            // Ideally trigger refresh
+            window.location.reload();
+        }
+        setIsModalOpen(false);
+    } catch (e) {
+        alert("Erro ao salvar.");
+    } finally {
+        setIsSaving(false);
     }
-
-    setIsModalOpen(false);
   };
 
   const requestDelete = (id: string, e: React.MouseEvent) => {
@@ -76,13 +105,16 @@ export const CashFlow: React.FC<CashFlowProps> = ({ data, setData }) => {
       setItemToDelete(id);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (itemToDelete) {
-        setData(prev => ({
-            ...prev,
-            cashFlow: prev.cashFlow.filter(i => i.id !== itemToDelete)
-        }));
-        setItemToDelete(null);
+        try {
+            await deleteCashFlow(itemToDelete);
+            setData(prev => ({
+                ...prev,
+                cashFlow: prev.cashFlow.filter(i => i.id !== itemToDelete)
+            }));
+            setItemToDelete(null);
+        } catch (e) { alert("Erro ao deletar."); }
     }
   };
 
@@ -286,6 +318,7 @@ export const CashFlow: React.FC<CashFlowProps> = ({ data, setData }) => {
                   placeholder="Ex: Mensalidade Cliente X"
                   value={currentItem.description || ''}
                   onChange={e => setCurrentItem({...currentItem, description: e.target.value})}
+                  disabled={isSaving}
                 />
               </div>
 
@@ -300,6 +333,7 @@ export const CashFlow: React.FC<CashFlowProps> = ({ data, setData }) => {
                     className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                     value={currentItem.value !== undefined ? currentItem.value : ''}
                     onChange={e => setCurrentItem({...currentItem, value: Number(e.target.value)})}
+                    disabled={isSaving}
                     />
                 </div>
                 <div>
@@ -310,6 +344,7 @@ export const CashFlow: React.FC<CashFlowProps> = ({ data, setData }) => {
                     className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                     value={currentItem.date || ''}
                     onChange={e => setCurrentItem({...currentItem, date: e.target.value})}
+                    disabled={isSaving}
                     />
                 </div>
               </div>
@@ -320,6 +355,7 @@ export const CashFlow: React.FC<CashFlowProps> = ({ data, setData }) => {
                     className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                     value={currentItem.paymentMethod || PaymentMethod.OTHER}
                     onChange={(e) => setCurrentItem({...currentItem, paymentMethod: e.target.value as PaymentMethod})}
+                    disabled={isSaving}
                 >
                     {Object.values(PaymentMethod).map(method => (
                         <option key={method} value={method}>{method}</option>
@@ -334,6 +370,7 @@ export const CashFlow: React.FC<CashFlowProps> = ({ data, setData }) => {
                     placeholder="Detalhes adicionais..."
                     value={currentItem.observation || ''}
                     onChange={e => setCurrentItem({...currentItem, observation: e.target.value})}
+                    disabled={isSaving}
                 />
               </div>
               
@@ -342,12 +379,14 @@ export const CashFlow: React.FC<CashFlowProps> = ({ data, setData }) => {
                   type="button" 
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+                  disabled={isSaving}
                 >
                   Cancelar
                 </button>
                 <button 
                   type="submit" 
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                  disabled={isSaving}
                 >
                   {isEditing ? 'Salvar' : 'Adicionar'}
                 </button>

@@ -17,7 +17,7 @@ import { CompanyManager } from './components/SuperAdmin/CompanyManager';
 import { ProfileModal } from './components/ProfileModal';
 import { useSupabaseSystem } from './hooks/useSupabaseSystem';
 import { registerOwnerAndCompany } from './services/supabaseService';
-import { Menu, CheckCircle, AlertOctagon, X, Cloud, RefreshCw, WifiOff, ArrowDownCircle, Trash2, AlertTriangle } from 'lucide-react';
+import { Menu, CheckCircle, AlertOctagon, X, Cloud, RefreshCw, WifiOff, ArrowDownCircle, Trash2, AlertTriangle, Database } from 'lucide-react';
 
 const APP_USER_KEY = 'facilita_current_user_v2';
 
@@ -87,14 +87,10 @@ export const App: React.FC = () => {
   };
 
   const handleRegisterCompany = async (companyName: string, adminName: string, email: string, pass: string) => {
-      try {
-        await registerOwnerAndCompany(companyName, adminName, email, pass);
-        setAuthView('login');
-        showNotification("Empresa e Login criados! Acesse com suas credenciais.", 'success');
-      } catch (e: any) {
-        console.error(e);
-        showNotification(e.message || "Erro ao criar conta.", 'error');
-      }
+      // Allow the error to propagate to SignUp component for display
+      await registerOwnerAndCompany(companyName, adminName, email, pass);
+      setAuthView('login');
+      showNotification("Empresa e Login criados! Acesse com suas credenciais.", 'success');
   };
 
   // --- PROFILE ACTIONS ---
@@ -137,14 +133,30 @@ export const App: React.FC = () => {
   // 2. Tenant App View
   if ((syncStatus === 'loading' && !tenantData) || !tenantData) {
       return (
-        <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 gap-4">
-            <RefreshCw className="animate-spin text-indigo-600" size={40} />
-            <p className="text-slate-500">Carregando dados da empresa...</p>
-            {syncStatus === 'error' && (
-                <div className="text-red-500 flex flex-col items-center mt-2">
-                    <p>Erro de conexão com Supabase.</p>
-                    <button onClick={handleLogout} className="mt-4 underline text-sm">Voltar ao Login</button>
+        <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 gap-4 p-6">
+            {syncStatus === 'error' ? (
+                <div className="bg-white p-8 rounded-xl shadow-lg max-w-md text-center border border-red-100">
+                    <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Database size={32} />
+                    </div>
+                    <h2 className="text-xl font-bold text-slate-800 mb-2">Erro de Conexão</h2>
+                    <p className="text-slate-500 text-sm mb-6">
+                        Não foi possível carregar os dados da empresa. Isso geralmente ocorre se as permissões do banco de dados (RLS) não estiverem configuradas corretamente.
+                    </p>
+                    <div className="flex flex-col gap-3">
+                        <button onClick={() => window.location.reload()} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2">
+                            <RefreshCw size={18} /> Tentar Novamente
+                        </button>
+                        <button onClick={handleLogout} className="text-slate-500 hover:text-slate-800 text-sm py-2">
+                            Voltar para Login
+                        </button>
+                    </div>
                 </div>
+            ) : (
+                <>
+                    <RefreshCw className="animate-spin text-indigo-600" size={40} />
+                    <p className="text-slate-500 font-medium animate-pulse">Sincronizando com a nuvem...</p>
+                </>
             )}
         </div>
       );
@@ -184,7 +196,7 @@ export const App: React.FC = () => {
       />
 
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-        <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center justify-end gap-3 text-xs transition-colors duration-300">
+        <div className="bg-white border-b border-slate-200 px-6 py-2 flex items-center justify-end gap-3 text-xs transition-colors duration-300 shadow-sm z-10">
             {syncStatus === 'saving' && <span className="flex items-center gap-2 text-indigo-600 font-medium"><RefreshCw size={12} className="animate-spin" /> Salvando...</span>}
             {syncStatus === 'synced' && <span className="flex items-center gap-2 text-green-600 font-medium"><Cloud size={14} /> Online</span>}
             {syncStatus === 'error' && <span className="flex items-center gap-2 text-red-600 font-medium"><WifiOff size={14} /> Offline</span>}

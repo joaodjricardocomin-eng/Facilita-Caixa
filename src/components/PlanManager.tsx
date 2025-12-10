@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AppData, Plan } from '../types';
 import { Plus, Trash2, Edit2, Layers, AlertTriangle, Search, Power } from 'lucide-react';
+import { upsertPlan, deletePlan } from '../services/supabaseService';
 
 interface PlanManagerProps {
   data: AppData;
@@ -12,6 +13,7 @@ export const PlanManager: React.FC<PlanManagerProps> = ({ data, setData }) => {
   const [currentPlan, setCurrentPlan] = useState<Partial<Plan>>({ active: true });
   const [isEditing, setIsEditing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   
   // State for delete confirmation modal
   const [planToDelete, setPlanToDelete] = useState<string | null>(null);
@@ -27,30 +29,44 @@ export const PlanManager: React.FC<PlanManagerProps> = ({ data, setData }) => {
     setIsModalOpen(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentPlan.name || !currentPlan.monthlyFee || !currentPlan.serviceLimit) return;
+    
+    // Quick Hack to get tenant ID from existing data since it's not in props
+    const tenantId = data.users[0]?.companyId;
+    if (!tenantId) return;
 
-    if (isEditing && currentPlan.id) {
-      setData(prev => ({
-        ...prev,
-        plans: prev.plans.map(p => p.id === currentPlan.id ? { ...currentPlan, id: p.id } as Plan : p)
-      }));
-    } else {
-      const newPlan: Plan = {
-        id: `p${Date.now()}`,
-        name: currentPlan.name!,
-        monthlyFee: Number(currentPlan.monthlyFee),
-        serviceLimit: Number(currentPlan.serviceLimit),
-        active: currentPlan.active ?? true
-      };
+    setIsSaving(true);
+    try {
+        const plan: Plan = {
+            id: currentPlan.id || '',
+            name: currentPlan.name!,
+            monthlyFee: Number(currentPlan.monthlyFee),
+            serviceLimit: Number(currentPlan.serviceLimit),
+            active: currentPlan.active ?? true
+        };
 
-      setData(prev => ({
-        ...prev,
-        plans: [...prev.plans, newPlan]
-      }));
+        await upsertPlan(plan, tenantId);
+
+        if (isEditing && currentPlan.id) {
+            setData(prev => ({
+                ...prev,
+                plans: prev.plans.map(p => p.id === currentPlan.id ? plan : p)
+            }));
+        } else {
+            setData(prev => ({
+                ...prev,
+                plans: [...prev.plans, plan]
+            }));
+            window.location.reload();
+        }
+        setIsModalOpen(false);
+    } catch(e) {
+        alert("Erro ao salvar plano.");
+    } finally {
+        setIsSaving(false);
     }
-    setIsModalOpen(false);
   };
 
   const requestDelete = (id: string) => {
@@ -62,13 +78,16 @@ export const PlanManager: React.FC<PlanManagerProps> = ({ data, setData }) => {
     setPlanToDelete(id);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (planToDelete) {
-        setData(prev => ({
-            ...prev,
-            plans: prev.plans.filter(p => p.id !== planToDelete)
-        }));
-        setPlanToDelete(null);
+        try {
+            await deletePlan(planToDelete);
+            setData(prev => ({
+                ...prev,
+                plans: prev.plans.filter(p => p.id !== planToDelete)
+            }));
+            setPlanToDelete(null);
+        } catch (e) { alert("Erro ao excluir."); }
     }
   };
 
@@ -160,6 +179,7 @@ export const PlanManager: React.FC<PlanManagerProps> = ({ data, setData }) => {
                   className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                   value={currentPlan.name || ''}
                   onChange={e => setCurrentPlan({...currentPlan, name: e.target.value})}
+                  disabled={isSaving}
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -173,6 +193,7 @@ export const PlanManager: React.FC<PlanManagerProps> = ({ data, setData }) => {
                     className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                     value={currentPlan.monthlyFee !== undefined ? currentPlan.monthlyFee : ''}
                     onChange={e => setCurrentPlan({...currentPlan, monthlyFee: Number(e.target.value)})}
+                    disabled={isSaving}
                     />
                 </div>
                 <div>
@@ -184,6 +205,7 @@ export const PlanManager: React.FC<PlanManagerProps> = ({ data, setData }) => {
                     className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                     value={currentPlan.serviceLimit !== undefined ? currentPlan.serviceLimit : ''}
                     onChange={e => setCurrentPlan({...currentPlan, serviceLimit: Number(e.target.value)})}
+                    disabled={isSaving}
                     />
                 </div>
               </div>
@@ -193,6 +215,7 @@ export const PlanManager: React.FC<PlanManagerProps> = ({ data, setData }) => {
                     type="button"
                     onClick={() => setCurrentPlan(prev => ({...prev, active: !prev.active}))}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition ${currentPlan.active ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}
+                    disabled={isSaving}
                  >
                     <Power size={16} />
                     <span className="text-sm font-medium">{currentPlan.active ? 'Plano Ativo' : 'Plano Inativo'}</span>
@@ -204,14 +227,16 @@ export const PlanManager: React.FC<PlanManagerProps> = ({ data, setData }) => {
                   type="button" 
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+                  disabled={isSaving}
                 >
                   Cancelar
                 </button>
                 <button 
                   type="submit" 
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                  disabled={isSaving}
                 >
-                  Salvar
+                  {isSaving ? 'Salvando...' : 'Salvar'}
                 </button>
               </div>
             </form>

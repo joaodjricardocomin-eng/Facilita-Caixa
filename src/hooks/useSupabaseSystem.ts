@@ -1,89 +1,44 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { supabase } from '../supabaseClient';
+import React, { useState, useEffect } from 'react';
 import { AppData } from '../types';
-import { saveTenantDataSupabase } from '../services/supabaseService';
+import { loadCompanyData } from '../services/supabaseService';
 
 export const useSupabaseSystem = (companyId: string | undefined) => {
   const [data, setData] = useState<AppData | null>(null);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'loading' | 'error'>('loading');
-  const saveTimeout = useRef<any>(null);
-  const isRemoteUpdate = useRef(false);
 
-  // 1. Load & Listen
+  const refreshData = async () => {
+      if (!companyId) return;
+      try {
+          setSyncStatus('loading');
+          const newData = await loadCompanyData(companyId);
+          setData(newData);
+          setSyncStatus('synced');
+      } catch (e) {
+          console.error("Sync Error:", e);
+          setSyncStatus('error');
+      }
+  };
+
   useEffect(() => {
     if (!companyId) {
         setSyncStatus('loading');
         return;
     }
-
-    const loadInitial = async () => {
-        try {
-            const { data: tenant, error } = await supabase
-                .from('tenants')
-                .select('data')
-                .eq('id', companyId)
-                .single();
-            
-            if (error) throw error;
-            if (tenant && tenant.data) {
-                isRemoteUpdate.current = true;
-                setData(tenant.data as AppData);
-                setSyncStatus('synced');
-            } else {
-                console.error("Dados da empresa vazios ou não encontrados.");
-                setSyncStatus('error');
-            }
-        } catch (e) {
-            console.error("Erro ao carregar dados iniciais:", e);
-            setSyncStatus('error');
-        }
-    };
-
-    loadInitial();
-
-    // Setup Realtime Subscription
-    const channel = supabase
-        .channel(`public:tenants:id=eq.${companyId}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tenants', filter: `id=eq.${companyId}` }, (payload) => {
-            if (payload.new && payload.new.data) {
-                // Check if the update is different from local to avoid overwrite loops
-                if (syncStatus !== 'saving') {
-                    console.log("Recebendo atualização remota Supabase...");
-                    isRemoteUpdate.current = true;
-                    setData(payload.new.data as AppData);
-                }
-            }
-        })
-        .subscribe();
-
-    return () => {
-        supabase.removeChannel(channel);
-    };
+    refreshData();
   }, [companyId]);
 
-  // 2. Save Logic
+  // Wrapper updateData that mimics the old behavior but warns
+  // Ideally, components should call setData locally AND call service methods
   const updateData = (action: React.SetStateAction<AppData>) => {
     setData(prev => {
         if (!prev) return null;
         const newData = typeof action === 'function' ? (action as any)(prev) : action;
-        
-        if (companyId) {
-            setSyncStatus('saving');
-            if (saveTimeout.current) clearTimeout(saveTimeout.current);
-            
-            saveTimeout.current = setTimeout(async () => {
-                try {
-                    await saveTenantDataSupabase(companyId, newData);
-                    setSyncStatus('synced');
-                } catch (e) {
-                    console.error("Erro ao salvar no Supabase:", e);
-                    setSyncStatus('error');
-                }
-            }, 1000);
-        }
+        // In relational mode, we don't save the WHOLE state anymore.
+        // Components must handle the API calls. 
+        // This set state just updates the UI optimistically.
         return newData;
     });
   };
 
-  return { data, updateData, syncStatus };
+  return { data, updateData, syncStatus, refreshData };
 };

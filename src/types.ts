@@ -2,7 +2,7 @@ export enum Role {
   USER = 'Assistente',
   SUPERVISOR = 'Supervisor',
   MANAGER = 'Gestor',
-  MASTER = 'Super Admin' // New Role
+  MASTER = 'Super Admin' 
 }
 
 export enum PaymentStatus {
@@ -30,8 +30,8 @@ export interface User {
   name: string;
   email: string;
   role: Role;
-  password?: string;
-  companyId?: string; // Link to tenant
+  password?: string; // Not stored in our DB anymore, handled by Supabase Auth
+  companyId?: string; 
 }
 
 export interface Plan {
@@ -82,7 +82,7 @@ export interface CashFlowItem {
 export interface CompanySettings {
   name: string;
   address?: string;
-  logoBase64?: string;
+  logoBase64?: string; // Now logo_url in DB, mapped in service
 }
 
 // Data specific to a single company
@@ -101,12 +101,12 @@ export interface Company {
   name: string;
   active: boolean;
   maxUsers: number;
-  planName: string; // SaaS Plan (e.g., 'Basic', 'Pro')
+  planName: string;
   createdAt: string;
-  data: AppData; // The encapsulated data for this tenant
+  data: AppData; 
 }
 
 export interface SystemState {
-  masterUsers: User[]; // Changed to Array for multiple admins
+  masterUsers: User[];
   companies: Company[];
 }

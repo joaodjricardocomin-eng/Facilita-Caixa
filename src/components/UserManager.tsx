@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AppData, User, Role } from '../types';
-import { Plus, Trash2, Edit2, Shield, AlertTriangle, X, Info } from 'lucide-react';
+import { Plus, Trash2, Edit2, Shield, AlertTriangle, X, Info, Loader2 } from 'lucide-react';
+import { syncUserMapping, removeUserMapping } from '../services/supabaseService';
 
 interface UserManagerProps {
   data: AppData;
@@ -13,8 +14,8 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
   const [editingUser, setEditingUser] = useState<Partial<User>>({});
   const [isEditMode, setIsEditMode] = useState(false);
   const [userToDelete, setUserToDelete] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   
-  // New State for Self Delete Alert
   const [showSelfDeleteAlert, setShowSelfDeleteAlert] = useState(false);
 
   const handleOpenModal = (user?: User) => {
@@ -28,29 +29,46 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
     setIsModalOpen(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser.name || !editingUser.email || !editingUser.role) return;
 
-    if (isEditMode && editingUser.id) {
-      setData(prev => ({
-        ...prev,
-        users: prev.users.map(u => u.id === editingUser.id ? { ...editingUser, id: u.id } as User : u)
-      }));
-    } else {
-      const newUser: User = {
-        id: `u${Date.now()}`,
-        name: editingUser.name!,
-        email: editingUser.email!,
-        role: editingUser.role!,
-        password: editingUser.password || '123456', // Default password
-      };
-      setData(prev => ({
-        ...prev,
-        users: [...prev.users, newUser]
-      }));
+    setIsSaving(true);
+    try {
+        let updatedUser: User;
+
+        if (isEditMode && editingUser.id) {
+            updatedUser = editingUser as User;
+            setData(prev => ({
+                ...prev,
+                users: prev.users.map(u => u.id === editingUser.id ? { ...editingUser, id: u.id } as User : u)
+            }));
+        } else {
+            updatedUser = {
+                id: `u${Date.now()}`,
+                name: editingUser.name!,
+                email: editingUser.email!,
+                role: editingUser.role!,
+                password: editingUser.password || '123456',
+            };
+            setData(prev => ({
+                ...prev,
+                users: [...prev.users, updatedUser]
+            }));
+        }
+
+        // Sync with Supabase Mapping Table if we have a company ID context
+        if (currentUser.companyId) {
+            await syncUserMapping(currentUser.companyId, updatedUser);
+        }
+
+        setIsModalOpen(false);
+    } catch (err) {
+        console.error("Erro ao salvar usuário:", err);
+        alert("Erro ao sincronizar usuário com a nuvem.");
+    } finally {
+        setIsSaving(false);
     }
-    setIsModalOpen(false);
   };
 
   const requestDelete = (id: string, e: React.MouseEvent) => {
@@ -62,12 +80,21 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
     setUserToDelete(id);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (userToDelete) {
+        const userToRemove = data.users.find(u => u.id === userToDelete);
+        
         setData(prev => ({
             ...prev,
             users: prev.users.filter(u => u.id !== userToDelete)
         }));
+
+        if (userToRemove && userToRemove.email) {
+            try {
+                await removeUserMapping(userToRemove.email);
+            } catch (e) { console.error("Erro ao remover mapping", e); }
+        }
+
         setUserToDelete(null);
     }
   };
@@ -147,6 +174,7 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
                   className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                   value={editingUser.name || ''}
                   onChange={e => setEditingUser({...editingUser, name: e.target.value})}
+                  disabled={isSaving}
                 />
               </div>
               <div>
@@ -157,6 +185,7 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
                   className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                   value={editingUser.email || ''}
                   onChange={e => setEditingUser({...editingUser, email: e.target.value})}
+                  disabled={isSaving}
                 />
               </div>
               {!isEditMode && (
@@ -168,6 +197,7 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
                     placeholder="Padrão: 123456"
                     value={editingUser.password || ''}
                     onChange={e => setEditingUser({...editingUser, password: e.target.value})}
+                    disabled={isSaving}
                     />
                 </div>
               )}
@@ -177,7 +207,7 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
                   className="w-full p-2 border border-slate-300 rounded-lg bg-white disabled:bg-slate-100 disabled:text-slate-500"
                   value={editingUser.role || Role.USER}
                   onChange={e => setEditingUser({...editingUser, role: e.target.value as Role})}
-                  disabled={editingUser.id === currentUser.id} // Disable changing own role
+                  disabled={editingUser.id === currentUser.id || isSaving}
                 >
                   <option value={Role.USER}>Assistente</option>
                   <option value={Role.SUPERVISOR}>Supervisor</option>
@@ -195,13 +225,16 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
                   type="button" 
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+                  disabled={isSaving}
                 >
                   Cancelar
                 </button>
                 <button 
                   type="submit" 
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                  disabled={isSaving}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-70"
                 >
+                  {isSaving && <Loader2 className="animate-spin" size={16} />}
                   Salvar
                 </button>
               </div>
@@ -210,7 +243,6 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
         </div>
       )}
 
-      {/* Modal de Alerta de Auto-Exclusão */}
       {showSelfDeleteAlert && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 animate-fade-in">
               <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 relative border-l-4 border-amber-500">
@@ -221,10 +253,7 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
                       <div>
                           <h3 className="text-lg font-bold text-slate-800">Ação não permitida</h3>
                           <p className="text-slate-600 text-sm mt-2">
-                              Você não pode excluir sua própria conta nesta tela de gerenciamento.
-                          </p>
-                          <p className="text-slate-500 text-sm mt-2">
-                              Para excluir sua conta permanentemente, acesse seu <b>Perfil</b> no menu lateral e procure a opção na zona de perigo.
+                              Você não pode excluir sua própria conta nesta tela.
                           </p>
                       </div>
                   </div>
@@ -240,7 +269,6 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
           </div>
       )}
 
-      {/* Modal de Confirmação de Exclusão (Outros Usuários) */}
       {userToDelete && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 animate-fade-in">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
@@ -250,7 +278,7 @@ export const UserManager: React.FC<UserManagerProps> = ({ data, setData, current
                 </div>
                 <h2 className="text-xl font-bold text-slate-800 mb-2">Excluir Usuário?</h2>
                 <p className="text-slate-500 mb-6">
-                    Tem certeza que deseja excluir este usuário? Esta ação não pode ser desfeita.
+                    Tem certeza? Isso impedirá o acesso deste usuário imediatamente.
                 </p>
                 <div className="flex gap-3 w-full">
                     <button 

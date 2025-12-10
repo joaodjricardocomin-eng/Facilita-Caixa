@@ -1,15 +1,17 @@
 import React, { useCallback, useState } from 'react';
 import { AppData, MonthlyRecord, PaymentStatus, UsageLog, CashFlowItem, CashFlowType, PaymentMethod } from '../types';
 import { AlertCircle, RefreshCcw, Plus, History, X, Trash2, AlertTriangle, Search, DollarSign } from 'lucide-react';
+import { ensureMonthlyRecord, addUsageLog, deleteUsageLog, addCashFlow } from '../services/supabaseService';
 
 interface MonthlyControlProps {
   data: AppData;
   setData: React.Dispatch<React.SetStateAction<AppData>>;
   currentMonth: string;
+  currentUser: any;
   onNotification?: (message: string, type: 'success' | 'error') => void;
 }
 
-export const MonthlyControl: React.FC<MonthlyControlProps> = ({ data, setData, currentMonth, onNotification }) => {
+export const MonthlyControl: React.FC<MonthlyControlProps> = ({ data, setData, currentMonth, currentUser, onNotification }) => {
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isAddServiceModalOpen, setIsAddServiceModalOpen] = useState(false);
   const [selectedClientForModal, setSelectedClientForModal] = useState<string | null>(null);
@@ -38,28 +40,37 @@ export const MonthlyControl: React.FC<MonthlyControlProps> = ({ data, setData, c
     return data.records.find(r => r.clientId === clientId && r.month === currentMonth);
   };
 
-  const handleUpdateRecord = useCallback((clientId: string, field: keyof MonthlyRecord, value: any) => {
+  const handleUpdateRecord = async (clientId: string, field: keyof MonthlyRecord, value: any) => {
+    // 1. Update Local Optimistically
     setData(prev => {
       const existingIndex = prev.records.findIndex(r => r.clientId === clientId && r.month === currentMonth);
       let newRecords = [...prev.records];
+      let updatedRecord: MonthlyRecord;
 
       if (existingIndex >= 0) {
-        newRecords[existingIndex] = { ...newRecords[existingIndex], [field]: value };
+        updatedRecord = { ...newRecords[existingIndex], [field]: value };
+        newRecords[existingIndex] = updatedRecord;
       } else {
-        const newRecord: MonthlyRecord = {
-          id: `r${Date.now()}`,
+        updatedRecord = {
+          id: `temp-${Date.now()}`,
           clientId,
           month: currentMonth,
           servicesUsed: 0,
           usageHistory: [],
           status: PaymentStatus.PENDING,
           [field]: value
-        };
-        newRecords.push(newRecord);
+        } as MonthlyRecord;
+        newRecords.push(updatedRecord);
       }
+      
+      // 2. Persist to DB
+      if (currentUser.companyId) {
+          ensureMonthlyRecord(updatedRecord, currentUser.companyId).catch(console.error);
+      }
+
       return { ...prev, records: newRecords };
     });
-  }, [setData, currentMonth]);
+  };
 
   const initiateRenew = (clientId: string) => {
     const client = data.clients.find(c => c.id === clientId);
@@ -74,60 +85,41 @@ export const MonthlyControl: React.FC<MonthlyControlProps> = ({ data, setData, c
     }
   };
 
-  const confirmRenew = (addToCashFlow: boolean) => {
-      if (!renewClient) return;
+  const confirmRenew = async (addToCashFlow: boolean) => {
+      if (!renewClient || !currentUser.companyId) return;
       
       const clientId = renewClient.id;
       const note = `Renovado manualmente em ${new Date().toLocaleDateString('pt-BR')}`;
       
-      setData(prev => {
-        // 1. Update Monthly Record (Reset)
-        const existingIndex = prev.records.findIndex(r => r.clientId === clientId && r.month === currentMonth);
-        let newRecords = [...prev.records];
+      // 1. DB Update Record
+      const record = {
+          id: '', // let ensure handle fetch
+          clientId: clientId,
+          month: currentMonth,
+          servicesUsed: 0, // Reset
+          status: PaymentStatus.PENDING,
+          usageHistory: [],
+          notes: note // We'll overwrite for simplicity in this logic
+      } as MonthlyRecord;
 
-        if (existingIndex >= 0) {
-            const oldUsage = newRecords[existingIndex].servicesUsed;
-            const historyNote = `[Ciclo Fechado: ${oldUsage} serviços]`;
+      await ensureMonthlyRecord(record, currentUser.companyId);
 
-            newRecords[existingIndex] = { 
-                ...newRecords[existingIndex], 
-                status: PaymentStatus.PENDING,
-                servicesUsed: 0,
-                usageHistory: [], 
-                notes: newRecords[existingIndex].notes ? `${newRecords[existingIndex].notes} | ${historyNote} | ${note}` : `${historyNote} | ${note}`
-            };
-        } else {
-             const newRecord: MonthlyRecord = {
-                id: `r${Date.now()}`,
-                clientId,
-                month: currentMonth,
-                servicesUsed: 0,
-                usageHistory: [],
-                status: PaymentStatus.PENDING,
-                notes: note
-            };
-            newRecords.push(newRecord);
-        }
+      // 2. DB Update CashFlow
+      if (addToCashFlow) {
+          await addCashFlow({
+              id: '',
+              date: new Date().toISOString().split('T')[0],
+              description: `Mensalidade - ${renewClient.name}`,
+              value: renewClient.planValue,
+              type: CashFlowType.INCOME,
+              paymentMethod: renewPaymentMethod,
+              observation: 'Lançado automaticamente via renovação mensal'
+          }, currentUser.companyId);
+      }
 
-        // 2. Add to Cash Flow if requested
-        let newCashFlow = [...prev.cashFlow];
-        if (addToCashFlow) {
-            const cfItem: CashFlowItem = {
-                id: `cf-renew-${Date.now()}`,
-                date: new Date().toISOString().split('T')[0],
-                description: `Mensalidade - ${renewClient.name}`,
-                value: renewClient.planValue,
-                type: CashFlowType.INCOME,
-                paymentMethod: renewPaymentMethod,
-                observation: 'Lançado automaticamente via renovação mensal'
-            };
-            newCashFlow = [cfItem, ...newCashFlow].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        }
-
-        return { ...prev, records: newRecords, cashFlow: newCashFlow };
-    });
-    setRenewClient(null);
-    if(onNotification) onNotification("Renovação realizada com sucesso!", 'success');
+      setRenewClient(null);
+      if(onNotification) onNotification("Renovação realizada com sucesso! Recarregando dados...", 'success');
+      window.location.reload(); // Refresh to ensure sync
   };
 
   const openAddServiceModal = (clientId: string) => {
@@ -151,9 +143,9 @@ export const MonthlyControl: React.FC<MonthlyControlProps> = ({ data, setData, c
     if (limit > 0 && (currentUsage + newServiceQty > limit)) {
         // Limit Exceeded Interception
         setPendingServiceLog({ desc: newServiceDesc, qty: newServiceQty });
-        setExtraChargeValue(0); // Reset or set a default
-        setIsAddServiceModalOpen(false); // Close normal modal
-        setIsOverLimitModalOpen(true); // Open Alert Modal
+        setExtraChargeValue(0); 
+        setIsAddServiceModalOpen(false); 
+        setIsOverLimitModalOpen(true); 
         return;
     }
 
@@ -162,67 +154,55 @@ export const MonthlyControl: React.FC<MonthlyControlProps> = ({ data, setData, c
     setIsAddServiceModalOpen(false);
   };
 
-  const processAddService = (desc: string, qty: number) => {
-      if (!selectedClientForModal) return;
+  const processAddService = async (desc: string, qty: number) => {
+      if (!selectedClientForModal || !currentUser.companyId) return;
 
-      setData(prev => {
-        const existingIndex = prev.records.findIndex(r => r.clientId === selectedClientForModal && r.month === currentMonth);
-        let newRecords = [...prev.records];
-        
-        const newLog: UsageLog = {
-            id: `log${Date.now()}`,
-            date: new Date().toLocaleDateString('pt-BR'),
-            description: desc,
-            quantity: Number(qty)
-        };
+      const record = getRecord(selectedClientForModal) || {
+          id: '',
+          clientId: selectedClientForModal,
+          month: currentMonth,
+          servicesUsed: 0,
+          usageHistory: [],
+          status: PaymentStatus.PENDING,
+          notes: ''
+      };
 
-        if (existingIndex >= 0) {
-            const currentRecord = newRecords[existingIndex];
-            const updatedHistory = [...(currentRecord.usageHistory || []), newLog];
-            const updatedTotal = updatedHistory.reduce((acc, item) => acc + item.quantity, 0);
+      // 1. Ensure Record Exists
+      const recordId = await ensureMonthlyRecord(record, currentUser.companyId);
 
-            newRecords[existingIndex] = { 
-                ...currentRecord, 
-                usageHistory: updatedHistory,
-                servicesUsed: updatedTotal
-            };
-        } else {
-            // Create record if first time
-            const newRecord: MonthlyRecord = {
-                id: `r${Date.now()}`,
-                clientId: selectedClientForModal,
-                month: currentMonth,
-                servicesUsed: Number(qty),
-                usageHistory: [newLog],
-                status: PaymentStatus.PENDING,
-            };
-            newRecords.push(newRecord);
-        }
-        return { ...prev, records: newRecords };
-    });
+      // 2. Add Log
+      const newLog: UsageLog = {
+          id: `log-${Date.now()}`,
+          date: new Date().toLocaleDateString('pt-BR'),
+          description: desc,
+          quantity: Number(qty)
+      };
+      
+      await addUsageLog(newLog, recordId, currentUser.companyId);
+
+      // 3. Update Record Count
+      const newTotal = (record.servicesUsed || 0) + Number(qty);
+      await ensureMonthlyRecord({ ...record, servicesUsed: newTotal } as MonthlyRecord, currentUser.companyId);
+
+      window.location.reload();
   };
 
-  const confirmExtraCharge = (shouldCharge: boolean) => {
-    if (!pendingServiceLog || !selectedClientForModal) return;
+  const confirmExtraCharge = async (shouldCharge: boolean) => {
+    if (!pendingServiceLog || !selectedClientForModal || !currentUser.companyId) return;
 
-    processAddService(pendingServiceLog.desc, pendingServiceLog.qty);
+    await processAddService(pendingServiceLog.desc, pendingServiceLog.qty);
 
     if (shouldCharge) {
         const clientName = data.clients.find(c => c.id === selectedClientForModal)?.name || 'Cliente';
-        const cfItem: CashFlowItem = {
-            id: `cf-extra-${Date.now()}`,
+        await addCashFlow({
+            id: '',
             date: new Date().toISOString().split('T')[0],
             description: `Serviço Adicional - ${pendingServiceLog.desc} (${clientName})`,
             value: Number(extraChargeValue),
             type: CashFlowType.INCOME,
             paymentMethod: extraChargeMethod,
             observation: 'Cobrança por limite excedido'
-        };
-
-        setData(prev => ({
-            ...prev,
-            cashFlow: [cfItem, ...prev.cashFlow].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        }));
+        }, currentUser.companyId);
 
         if(onNotification) onNotification("Serviço registrado e cobrança lançada no caixa!", 'success');
     } else {
@@ -233,27 +213,11 @@ export const MonthlyControl: React.FC<MonthlyControlProps> = ({ data, setData, c
     setPendingServiceLog(null);
   };
 
-  const handleConfirmDeleteLog = () => {
+  const handleConfirmDeleteLog = async () => {
       if (!selectedClientForModal || !logToDelete) return;
-
-      setData(prev => {
-        const existingIndex = prev.records.findIndex(r => r.clientId === selectedClientForModal && r.month === currentMonth);
-        if (existingIndex < 0) return prev;
-
-        const currentRecord = prev.records[existingIndex];
-        const updatedHistory = currentRecord.usageHistory.filter(log => log.id !== logToDelete);
-        const updatedTotal = updatedHistory.reduce((acc, item) => acc + item.quantity, 0);
-
-        const newRecords = [...prev.records];
-        newRecords[existingIndex] = {
-            ...currentRecord,
-            usageHistory: updatedHistory,
-            servicesUsed: updatedTotal
-        };
-
-        return { ...prev, records: newRecords };
-      });
+      await deleteUsageLog(logToDelete);
       setLogToDelete(null);
+      window.location.reload(); // Hard refresh to recalc totals via DB fetch
   };
 
   const openHistoryModal = (clientId: string) => {
@@ -393,6 +357,7 @@ export const MonthlyControl: React.FC<MonthlyControlProps> = ({ data, setData, c
                         className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-100 outline-none transition"
                         value={record?.notes || ''}
                         onChange={(e) => handleUpdateRecord(client.id, 'notes', e.target.value)}
+                        onBlur={() => { /* Trigger save on blur if needed, currently done on change */ }}
                      />
                   </td>
                 </tr>

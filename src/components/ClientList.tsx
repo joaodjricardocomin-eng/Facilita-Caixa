@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AppData, Client, Role, User } from '../types';
-import { Plus, Trash2, Edit2, AlertTriangle, Search } from 'lucide-react';
+import { Plus, Trash2, Edit2, AlertTriangle, Search, Filter, Loader2 } from 'lucide-react';
+import { upsertClient, deleteClient } from '../services/supabaseService';
 
 interface ClientListProps {
   data: AppData;
@@ -15,6 +16,7 @@ export const ClientList: React.FC<ClientListProps> = ({ data, setData, currentUs
   const [currentClient, setCurrentClient] = useState<Partial<Client>>({ active: true, dueDay: 10 });
   const [isEditing, setIsEditing] = useState(false);
   const [clientToDelete, setClientToDelete] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
@@ -33,35 +35,44 @@ export const ClientList: React.FC<ClientListProps> = ({ data, setData, currentUs
     setIsModalOpen(true);
   };
 
-  const handleSaveClient = (e: React.FormEvent) => {
+  const handleSaveClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentClient.name || !currentClient.planId) return;
+    if (!currentClient.name || !currentClient.planId || !currentUser.companyId) return;
 
-    if (isEditing && currentClient.id) {
-      // Edit Mode
-      setData(prev => ({
-        ...prev,
-        clients: prev.clients.map(c => c.id === currentClient.id ? { ...currentClient, id: c.id } as Client : c)
-      }));
-    } else {
-      // Create Mode
-      const newClient: Client = {
-        id: `c${Date.now()}`,
-        name: currentClient.name!,
-        document: currentClient.document || '',
-        contact: currentClient.contact || '',
-        planId: currentClient.planId!,
-        active: currentClient.active ?? true,
-        dueDay: Number(currentClient.dueDay) || 10,
-      };
+    setIsSaving(true);
+    try {
+        const clientPayload = {
+            ...currentClient,
+            document: currentClient.document || '',
+            contact: currentClient.contact || '',
+            dueDay: Number(currentClient.dueDay) || 10,
+            active: currentClient.active ?? true
+        } as Client;
 
-      setData(prev => ({
-        ...prev,
-        clients: [...prev.clients, newClient]
-      }));
+        // DB Update
+        await upsertClient(clientPayload, currentUser.companyId);
+
+        // Optimistic UI Update (Refresh triggered by parent usually, but good to simulate)
+        if (isEditing && currentClient.id) {
+            setData(prev => ({
+                ...prev,
+                clients: prev.clients.map(c => c.id === currentClient.id ? { ...clientPayload, id: c.id } : c)
+            }));
+        } else {
+            setData(prev => ({
+                ...prev,
+                clients: [...prev.clients, { ...clientPayload, id: 'temp-' + Date.now() }] 
+            }));
+            // Trigger a real refresh if possible, or just wait for next sync
+            window.location.reload(); // Simple brute force refresh to get ID from DB
+        }
+        setIsModalOpen(false);
+    } catch (err) {
+        alert("Erro ao salvar cliente.");
+        console.error(err);
+    } finally {
+        setIsSaving(false);
     }
-    
-    setIsModalOpen(false);
   };
 
   const requestDelete = (id: string, e: React.MouseEvent) => {
@@ -73,13 +84,16 @@ export const ClientList: React.FC<ClientListProps> = ({ data, setData, currentUs
     setClientToDelete(id);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (clientToDelete) {
-        setData(prev => ({
-            ...prev,
-            clients: prev.clients.filter(c => c.id !== clientToDelete)
-        }));
-        setClientToDelete(null);
+        try {
+            await deleteClient(clientToDelete);
+            setData(prev => ({
+                ...prev,
+                clients: prev.clients.filter(c => c.id !== clientToDelete)
+            }));
+            setClientToDelete(null);
+        } catch (e) { alert("Erro ao excluir."); }
     }
   };
 
@@ -240,6 +254,7 @@ export const ClientList: React.FC<ClientListProps> = ({ data, setData, currentUs
                   className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                   value={currentClient.name || ''}
                   onChange={e => setCurrentClient({...currentClient, name: e.target.value})}
+                  disabled={isSaving}
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -250,6 +265,7 @@ export const ClientList: React.FC<ClientListProps> = ({ data, setData, currentUs
                     className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                     value={currentClient.document || ''}
                     onChange={e => setCurrentClient({...currentClient, document: e.target.value})}
+                    disabled={isSaving}
                     />
                 </div>
                 <div>
@@ -262,6 +278,7 @@ export const ClientList: React.FC<ClientListProps> = ({ data, setData, currentUs
                     className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                     value={currentClient.dueDay || ''}
                     onChange={e => setCurrentClient({...currentClient, dueDay: Number(e.target.value)})}
+                    disabled={isSaving}
                     />
                 </div>
               </div>
@@ -272,6 +289,7 @@ export const ClientList: React.FC<ClientListProps> = ({ data, setData, currentUs
                   required
                   value={currentClient.planId || ''}
                   onChange={e => setCurrentClient({...currentClient, planId: e.target.value})}
+                  disabled={isSaving}
                 >
                   <option value="">Selecione...</option>
                   {data.plans.map(p => (
@@ -286,6 +304,7 @@ export const ClientList: React.FC<ClientListProps> = ({ data, setData, currentUs
                   className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                   value={currentClient.contact || ''}
                   onChange={e => setCurrentClient({...currentClient, contact: e.target.value})}
+                  disabled={isSaving}
                 />
               </div>
               
@@ -296,6 +315,7 @@ export const ClientList: React.FC<ClientListProps> = ({ data, setData, currentUs
                     checked={currentClient.active}
                     onChange={e => setCurrentClient({...currentClient, active: e.target.checked})}
                     className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                    disabled={isSaving}
                 />
                 <label htmlFor="active" className="text-sm font-medium text-slate-700">Cliente Ativo</label>
               </div>
@@ -305,13 +325,16 @@ export const ClientList: React.FC<ClientListProps> = ({ data, setData, currentUs
                   type="button" 
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+                  disabled={isSaving}
                 >
                   Cancelar
                 </button>
                 <button 
                   type="submit" 
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-50"
+                  disabled={isSaving}
                 >
+                  {isSaving && <Loader2 size={16} className="animate-spin" />}
                   Salvar
                 </button>
               </div>

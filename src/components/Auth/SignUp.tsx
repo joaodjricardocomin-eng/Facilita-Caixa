@@ -3,7 +3,7 @@ import { ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
 
 interface SignUpProps {
   onBack: () => void;
-  onRegister: (companyName: string, adminName: string, email: string, pass: string) => void;
+  onRegister: (companyName: string, adminName: string, email: string, pass: string) => Promise<void>;
 }
 
 export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
@@ -34,10 +34,12 @@ export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
 
     try {
         await onRegister(formData.companyName, formData.adminName, formData.email, formData.password);
-        // Note: setIsLoading(false) might not run if onRegister redirects, which is fine
-    } catch(e) {
+        // O redirecionamento é feito pelo componente pai (App.tsx) ao resolver a promise com sucesso
+    } catch(e: any) {
         setIsLoading(false);
-        // Error handling is mostly done in parent, but safety net here
+        console.error("SignUp Error:", e);
+        // Exibe mensagem amigável ou o erro técnico
+        setError(e.message || "Erro ao registrar. Verifique sua conexão.");
     }
   };
 
@@ -61,6 +63,7 @@ export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
               value={formData.companyName}
               onChange={e => setFormData({...formData, companyName: e.target.value})}
               placeholder="Ex: Minha Contabilidade"
+              disabled={isLoading}
             />
           </div>
 
@@ -72,6 +75,7 @@ export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
               className="w-full p-2 border border-slate-300 rounded-lg bg-white"
               value={formData.adminName}
               onChange={e => setFormData({...formData, adminName: e.target.value})}
+              disabled={isLoading}
             />
           </div>
 
@@ -83,6 +87,7 @@ export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
               className="w-full p-2 border border-slate-300 rounded-lg bg-white"
               value={formData.email}
               onChange={e => setFormData({...formData, email: e.target.value})}
+              disabled={isLoading}
             />
           </div>
 
@@ -96,6 +101,7 @@ export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
                 value={formData.password}
                 onChange={e => setFormData({...formData, password: e.target.value})}
                 placeholder="Mín. 6 chars"
+                disabled={isLoading}
                 />
              </div>
              <div>
@@ -106,21 +112,22 @@ export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
                 className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                 value={formData.confirmPassword}
                 onChange={e => setFormData({...formData, confirmPassword: e.target.value})}
+                disabled={isLoading}
                 />
              </div>
           </div>
           
           {error && (
-            <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center gap-2 animate-fade-in">
-                <AlertCircle size={16} />
-                {error}
+            <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-start gap-2 animate-fade-in border border-red-100">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                <span>{error}</span>
             </div>
           )}
 
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition font-medium mt-4 flex items-center justify-center gap-2"
+            className="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700 transition font-medium mt-4 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
           >
             {isLoading ? <Loader2 className="animate-spin" size={20}/> : 'Cadastrar Empresa'}
           </button>
