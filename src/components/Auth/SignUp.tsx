@@ -17,7 +17,7 @@ export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -25,18 +25,20 @@ export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
       setError("As senhas não coincidem.");
       return;
     }
-    if (formData.password.length < 3) {
-      setError("A senha deve ter no mínimo 3 caracteres.");
+    if (formData.password.length < 6) {
+      setError("A senha deve ter no mínimo 6 caracteres.");
       return;
     }
 
     setIsLoading(true);
 
-    // Simula cadastro
-    setTimeout(() => {
-        onRegister(formData.companyName, formData.adminName, formData.email, formData.password);
+    try {
+        await onRegister(formData.companyName, formData.adminName, formData.email, formData.password);
+        // Note: setIsLoading(false) might not run if onRegister redirects, which is fine
+    } catch(e) {
         setIsLoading(false);
-    }, 1000);
+        // Error handling is mostly done in parent, but safety net here
+    }
   };
 
   return (
@@ -46,8 +48,8 @@ export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
           <ArrowLeft size={16} /> Voltar para Login
         </button>
         
-        <h2 className="text-2xl font-bold text-slate-800 mb-2">Criar Nova Conta</h2>
-        <p className="text-slate-500 mb-6">Comece a gerenciar seu escritório hoje.</p>
+        <h2 className="text-2xl font-bold text-slate-800 mb-2">Criar Conta Empresarial</h2>
+        <p className="text-slate-500 mb-6">Cadastre sua empresa e comece a gerenciar.</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -63,7 +65,7 @@ export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Seu Nome</label>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Seu Nome (Gestor)</label>
             <input
               type="text"
               required
@@ -93,7 +95,7 @@ export const SignUp: React.FC<SignUpProps> = ({ onBack, onRegister }) => {
                 className="w-full p-2 border border-slate-300 rounded-lg bg-white"
                 value={formData.password}
                 onChange={e => setFormData({...formData, password: e.target.value})}
-                placeholder="Mín. 3 chars"
+                placeholder="Mín. 6 chars"
                 />
              </div>
              <div>

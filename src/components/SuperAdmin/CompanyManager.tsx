@@ -1,23 +1,19 @@
 import React, { useState } from 'react';
 import { SystemState, Company, Role, User } from '../../types';
 import { Building, Power, Trash2, Edit2, LogOut, Plus, Search, ShieldCheck } from 'lucide-react';
+import { createCompany, updateCompanyMetadata, deleteCompany, addMasterUser, removeMasterUser } from '../../services/firestoreService';
 
 interface CompanyManagerProps {
-  system: SystemState;
-  setSystem: React.Dispatch<React.SetStateAction<SystemState>>;
+  system: SystemState; // We still pass the "View" of the system
   onLogout: () => void;
-  currentUser?: User; // Optional prop to avoid self-deletion
+  currentUser?: User;
 }
 
-export const CompanyManager: React.FC<CompanyManagerProps> = ({ system, setSystem, onLogout, currentUser }) => {
+export const CompanyManager: React.FC<CompanyManagerProps> = ({ system, onLogout, currentUser }) => {
   const [activeTab, setActiveTab] = useState<'companies' | 'admins'>('companies');
-  
-  // Companies State
   const [searchTerm, setSearchTerm] = useState('');
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Partial<Company>>({});
-  
-  // Admins State
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [newAdmin, setNewAdmin] = useState({ name: '', email: '', password: '' });
 
@@ -26,20 +22,21 @@ export const CompanyManager: React.FC<CompanyManagerProps> = ({ system, setSyste
     c.id.includes(searchTerm)
   );
 
-  // --- Company Handlers ---
-  const handleToggleStatus = (companyId: string) => {
-    setSystem(prev => ({
-        ...prev,
-        companies: prev.companies.map(c => c.id === companyId ? { ...c, active: !c.active } : c)
-    }));
+  const handleToggleStatus = async (company: Company) => {
+    try {
+        await updateCompanyMetadata(company.id, { active: !company.active });
+    } catch (e) {
+        alert("Erro ao atualizar status");
+    }
   };
 
-  const handleDeleteCompany = (companyId: string) => {
+  const handleDeleteCompany = async (companyId: string) => {
     if (window.confirm("Tem certeza que deseja excluir esta empresa e TODOS os seus dados?")) {
-        setSystem(prev => ({
-            ...prev,
-            companies: prev.companies.filter(c => c.id !== companyId)
-        }));
+        try {
+            await deleteCompany(companyId);
+        } catch (e) {
+            alert("Erro ao excluir empresa");
+        }
     }
   };
 
@@ -48,19 +45,23 @@ export const CompanyManager: React.FC<CompanyManagerProps> = ({ system, setSyste
       setIsCompanyModalOpen(true);
   };
 
-  const handleSaveCompany = () => {
+  const handleSaveCompany = async () => {
       if (editingCompany.id) {
-          setSystem(prev => ({
-              ...prev,
-              companies: prev.companies.map(c => c.id === editingCompany.id ? { ...c, ...editingCompany } as Company : c)
-          }));
+          try {
+            await updateCompanyMetadata(editingCompany.id, {
+                name: editingCompany.name,
+                planName: editingCompany.planName,
+                maxUsers: editingCompany.maxUsers
+            });
+            setIsCompanyModalOpen(false);
+            setEditingCompany({});
+          } catch(e) {
+              alert("Erro ao salvar");
+          }
       }
-      setIsCompanyModalOpen(false);
-      setEditingCompany({});
   };
 
-  // --- Admin Handlers ---
-  const handleAddAdmin = (e: React.FormEvent) => {
+  const handleAddAdmin = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!newAdmin.name || !newAdmin.email || !newAdmin.password) return;
 
@@ -72,16 +73,16 @@ export const CompanyManager: React.FC<CompanyManagerProps> = ({ system, setSyste
           password: newAdmin.password
       };
 
-      setSystem(prev => ({
-          ...prev,
-          masterUsers: [...prev.masterUsers, newMaster]
-      }));
-
-      setIsAdminModalOpen(false);
-      setNewAdmin({ name: '', email: '', password: '' });
+      try {
+        await addMasterUser(newMaster);
+        setIsAdminModalOpen(false);
+        setNewAdmin({ name: '', email: '', password: '' });
+      } catch (e) {
+          alert("Erro ao criar admin");
+      }
   };
 
-  const handleDeleteAdmin = (id: string) => {
+  const handleDeleteAdmin = async (id: string) => {
       if (system.masterUsers.length <= 1) {
           alert("Não é possível excluir o último administrador.");
           return;
@@ -91,10 +92,11 @@ export const CompanyManager: React.FC<CompanyManagerProps> = ({ system, setSyste
            return;
       }
       if (window.confirm("Tem certeza que deseja remover este administrador?")) {
-          setSystem(prev => ({
-              ...prev,
-              masterUsers: prev.masterUsers.filter(u => u.id !== id)
-          }));
+          try {
+            await removeMasterUser(id);
+          } catch(e) {
+              alert("Erro ao remover admin");
+          }
       }
   };
 
@@ -111,7 +113,7 @@ export const CompanyManager: React.FC<CompanyManagerProps> = ({ system, setSyste
                 </div>
                 <div>
                     <h1 className="text-xl font-bold">Painel Master</h1>
-                    <p className="text-xs text-slate-400">Gestão Multi-Empresas</p>
+                    <p className="text-xs text-slate-400">Gestão Multi-Empresas (DB v2)</p>
                 </div>
             </div>
             <div className="flex items-center gap-4">
@@ -204,11 +206,11 @@ export const CompanyManager: React.FC<CompanyManagerProps> = ({ system, setSyste
                                         </span>
                                     </td>
                                     <td className="p-4 text-center text-sm text-slate-600">
-                                        {company.data.users.length} / {company.maxUsers}
+                                        {company.data?.users?.length || 0} / {company.maxUsers}
                                     </td>
                                     <td className="p-4 text-center">
                                         <button 
-                                            onClick={() => handleToggleStatus(company.id)}
+                                            onClick={() => handleToggleStatus(company)}
                                             className={`px-3 py-1 rounded-full text-xs font-bold flex items-center justify-center gap-1 mx-auto w-24
                                                 ${company.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}
                                             `}

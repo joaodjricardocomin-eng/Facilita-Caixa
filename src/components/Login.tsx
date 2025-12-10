@@ -1,59 +1,41 @@
 import React, { useState } from 'react';
 import { User, SystemState } from '../types';
+import { performSupabaseLogin } from '../services/supabaseService';
 import { LayoutDashboard, UserPlus, Cloud, AlertCircle, Loader2 } from 'lucide-react';
 
 interface LoginProps {
-  system: SystemState;
+  system: SystemState; // Kept for interface compatibility but unused
   onLogin: (user: User) => void;
   onSignUp: () => void;
   onForgotPassword: () => void;
 }
 
-export const Login: React.FC<LoginProps> = ({ system, onLogin, onSignUp, onForgotPassword }) => {
+export const Login: React.FC<LoginProps> = ({ onLogin, onSignUp, onForgotPassword }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
-    // Simula validação (os dados já estão na memória via Hook)
-    setTimeout(() => {
-        // 1. Verifica Master Users
-        const masterUser = system.masterUsers.find(u => u.email === email && u.password === password);
-        if (masterUser) {
-            setIsLoading(false);
-            onLogin(masterUser);
-            return;
-        }
-
-        // 2. Verifica Usuários das Empresas
-        let foundUser: User | null = null;
-        let foundCompanyActive = false;
-
-        for (const company of system.companies) {
-            const user = company.data.users.find(u => u.email === email && u.password === password);
-            if (user) {
-                foundUser = { ...user, companyId: company.id };
-                foundCompanyActive = company.active;
-                break;
-            }
-        }
-
-        if (foundUser) {
-            if (!foundCompanyActive) {
-                setError('Esta empresa foi desativada pelo administrador.');
-            } else {
-                onLogin(foundUser);
-            }
+    try {
+        // Use Supabase Service login
+        const user = await performSupabaseLogin(email, password);
+        
+        if (user) {
+            onLogin(user);
         } else {
             setError('Email ou senha incorretos.');
         }
+    } catch (err: any) {
+        console.error(err);
+        setError('Falha ao conectar. Verifique internet ou credenciais.');
+    } finally {
         setIsLoading(false);
-    }, 500);
+    }
   };
 
   return (
@@ -130,7 +112,7 @@ export const Login: React.FC<LoginProps> = ({ system, onLogin, onSignUp, onForgo
                 className="w-full flex items-center justify-center gap-2 text-slate-600 py-2 rounded-lg hover:bg-slate-50 transition font-medium border border-transparent hover:border-slate-200"
             >
                 <UserPlus size={18} />
-                Criar Nova Conta
+                Criar Conta Empresarial
             </button>
         </div>
       </div>

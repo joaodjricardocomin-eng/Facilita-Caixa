@@ -1,106 +1,98 @@
-import { useState, useEffect, useRef } from 'react';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import React, { useState, useEffect, useRef } from 'react';
+import { doc, onSnapshot, collection } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
-import { SystemState } from '../types';
-import { MOCK_SYSTEM_DATA } from '../constants';
+import { AppData, Company, User } from '../types';
+import { initializeDatabase, saveTenantData } from '../services/firestoreService';
 
-export const useFirestoreSystem = () => {
-  const [system, setSystem] = useState<SystemState>(MOCK_SYSTEM_DATA);
-  const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'error' | 'loading' | 'receiving'>('loading');
-  
-  // Refs to track state without triggering re-renders or stale closures in listeners
-  const systemRef = useRef(system);
-  const isFirstLoad = useRef(true);
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+// Hook simplificado para gerenciar dados de UMA empresa (Tenant)
+export const useTenantData = (companyId: string | undefined) => {
+  const [data, setData] = useState<AppData | null>(null);
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'saving' | 'loading' | 'error'>('loading');
+  const saveTimeout = useRef<any>(null);
   const isRemoteUpdate = useRef(false);
 
-  // Update ref whenever state changes
+  // Load / Sync Logic
   useEffect(() => {
-    systemRef.current = system;
-  }, [system]);
+    if (!companyId) return;
 
-  // 1. ESCUTAR MUDANÇAS DA NUVEM (Download Automático)
-  useEffect(() => {
-    if (!db.app.options.apiKey) {
-        console.warn("Firebase Keys não encontradas. Rodando em modo offline (Mock).");
-        setSyncStatus('error');
-        return;
-    }
-
-    const systemDocRef = doc(db, "system", "main_v1");
-    console.log("Iniciando conexão com Firestore...");
-
-    const unsubscribe = onSnapshot(systemDocRef, (docSnap) => {
-        if (docSnap.exists()) {
-            const remoteData = docSnap.data() as SystemState;
-            
-            // Compare remote data with CURRENT (Ref) local data
-            // This prevents stale closures from overwriting new local changes with old initial state
-            if (JSON.stringify(remoteData) !== JSON.stringify(systemRef.current)) {
-                // If we are currently saving, we might ignore this to avoid echo, 
-                // OR we might need to merge. For simple overwrite logic:
-                if (syncStatus !== 'saving') {
-                    console.log("Recebendo atualização da nuvem...");
-                    setSyncStatus('receiving');
-                    isRemoteUpdate.current = true; 
-                    setSystem(remoteData);
-                    setTimeout(() => setSyncStatus('synced'), 500);
-                }
-            } else {
-                if (syncStatus === 'loading') setSyncStatus('synced');
-            }
-        } else {
-            console.log("Banco de dados vazio. Criando estrutura inicial...");
-            setDoc(systemDocRef, MOCK_SYSTEM_DATA)
-                .then(() => {
-                    setSystem(MOCK_SYSTEM_DATA);
-                    setSyncStatus('synced');
-                })
-                .catch((err) => {
-                    console.error("Erro ao criar banco inicial:", err);
-                    setSyncStatus('error');
-                });
+    setSyncStatus('loading');
+    const unsub = onSnapshot(doc(db, 'companies', companyId), (docSnap) => {
+      if (docSnap.exists()) {
+        const company = docSnap.data() as Company;
+        // Evita loop se a gente acabou de salvar
+        if (syncStatus !== 'saving') {
+            isRemoteUpdate.current = true;
+            setData(company.data);
+            setSyncStatus('synced');
         }
-        isFirstLoad.current = false;
-    }, (error) => {
-        console.error("Erro de conexão Firestore:", error.message);
-        setSyncStatus('error'); 
-        isFirstLoad.current = false;
-    });
-
-    return () => unsubscribe();
-  }, []); 
-
-  // 2. ENVIAR MUDANÇAS PARA NUVEM (Upload Automático)
-  useEffect(() => {
-    // Skip save if it's the first load or if the change came from the server
-    if (isFirstLoad.current || isRemoteUpdate.current) {
-        isRemoteUpdate.current = false;
-        return;
-    }
-
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-
-    setSyncStatus('saving');
-
-    // Debounce reduced to 1.0s for snappier sync
-    saveTimeoutRef.current = setTimeout(async () => {
-      try {
-        if (!db.app.options.apiKey) return;
-        
-        const systemDocRef = doc(db, "system", "main_v1");
-        await setDoc(systemDocRef, system);
-        setSyncStatus('synced');
-      } catch (e) {
-        console.error("Erro ao salvar no Firebase:", e);
+      } else {
         setSyncStatus('error');
       }
-    }, 1000); 
+    }, (err) => {
+        console.error(err);
+        setSyncStatus('error');
+    });
 
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    };
-  }, [system]);
+    return () => unsub();
+  }, [companyId]);
 
-  return { system, setSystem, syncStatus };
+  // Save Logic (Debounced)
+  const updateData = (action: React.SetStateAction<AppData>) => {
+    setData(prev => {
+        if (!prev) return null;
+        const newData = typeof action === 'function' ? (action as any)(prev) : action;
+        
+        // Trigger Save
+        if (companyId) {
+            setSyncStatus('saving');
+            if (saveTimeout.current) clearTimeout(saveTimeout.current);
+            
+            saveTimeout.current = setTimeout(async () => {
+                try {
+                    await saveTenantData(companyId, newData);
+                    setSyncStatus('synced');
+                } catch (e) {
+                    console.error(e);
+                    setSyncStatus('error');
+                }
+            }, 1000);
+        }
+        return newData;
+    });
+  };
+
+  return { data, updateData, syncStatus };
+};
+
+// Hook para o Master (Admin) ver tudo
+export const useMasterSystem = () => {
+    const [companies, setCompanies] = useState<Company[]>([]);
+    const [masterUsers, setMasterUsers] = useState<User[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        // Init DB structure if empty
+        initializeDatabase();
+
+        // 1. Listen to Companies
+        const unsubComp = onSnapshot(collection(db, 'companies'), (snap) => {
+            const comps = snap.docs.map(d => d.data() as Company);
+            setCompanies(comps);
+            setLoading(false);
+        });
+
+        // 2. Listen to Masters
+        const unsubMaster = onSnapshot(doc(db, 'master', 'config'), (snap) => {
+            if (snap.exists()) {
+                setMasterUsers(snap.data().users);
+            }
+        });
+
+        return () => {
+            unsubComp();
+            unsubMaster();
+        };
+    }, []);
+
+    return { companies, masterUsers, loading };
 };
