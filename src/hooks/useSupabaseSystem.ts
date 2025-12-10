@@ -25,13 +25,16 @@ export const useSupabaseSystem = (companyId: string | undefined) => {
                 .single();
             
             if (error) throw error;
-            if (tenant) {
+            if (tenant && tenant.data) {
                 isRemoteUpdate.current = true;
                 setData(tenant.data as AppData);
                 setSyncStatus('synced');
+            } else {
+                console.error("Dados da empresa vazios ou não encontrados.");
+                setSyncStatus('error');
             }
         } catch (e) {
-            console.error(e);
+            console.error("Erro ao carregar dados iniciais:", e);
             setSyncStatus('error');
         }
     };

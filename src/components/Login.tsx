@@ -4,7 +4,7 @@ import { performSupabaseLogin } from '../services/supabaseService';
 import { LayoutDashboard, UserPlus, Cloud, AlertCircle, Loader2 } from 'lucide-react';
 
 interface LoginProps {
-  system: SystemState; // Kept for interface compatibility but unused
+  system: SystemState;
   onLogin: (user: User) => void;
   onSignUp: () => void;
   onForgotPassword: () => void;
@@ -22,7 +22,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onSignUp, onForgotPasswor
     setIsLoading(true);
 
     try {
-        // Use Supabase Service login
         const user = await performSupabaseLogin(email, password);
         
         if (user) {
@@ -32,7 +31,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onSignUp, onForgotPasswor
         }
     } catch (err: any) {
         console.error(err);
-        setError('Falha ao conectar. Verifique internet ou credenciais.');
+        setError(err.message || 'Falha na conexão. Verifique sua internet.');
     } finally {
         setIsLoading(false);
     }
